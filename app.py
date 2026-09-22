@@ -100,10 +100,13 @@ with c_toggle:
     auto_mode = st.toggle("🔄 自動跟 openD 報價", value=auto_mode, key="auto_mode")
 with c_note:
     if auto_mode:
-        st.caption(f"openD 報價自動更新中（每 15 秒）· 最後更新 "
-                   f"{time.strftime('%H:%M:%S', time.localtime(mtime)) if mtime else '—'}")
+        note = (f"openD 報價自動更新中（每 15 秒）· 最後更新 "
+                f"{time.strftime('%H:%M:%S', time.localtime(mtime)) if mtime else '—'}")
     else:
-        st.caption("已暫停自動同步 — 而家用手動輸入")
+        note = "已暫停自動同步 — 而家用手動輸入"
+    if manual:
+        note += f"　⚠️ 手動覆蓋: {', '.join(sorted(manual))}"
+    st.caption(note)
 st.subheader("📈 最新價格輸入 / Latest prices")
 cols = st.columns(4)
 new_prices = {}
@@ -140,9 +143,14 @@ if st.button("📋 套用批量價格 / Apply bulk prices") and bulk.strip():
         # re-init price widgets from the merged prices so the applied values show
         for k in [k for k in list(st.session_state) if k.startswith("px_")]:
             del st.session_state[k]
-        st.success(f"已套用 {n_applied} 個價格（本 session 手動覆蓋，唔會被自動報價冚走）")
+        st.session_state["bulk_notice"] = f"已套用 {n_applied} 個價格（本 session 手動覆蓋，唔會被自動報價冚走）"
+        st.rerun()
     else:
         st.warning("冇匹配到任何代碼 — 請檢查格式（每行 `代碼 價格`）")
+
+notice = st.session_state.pop("bulk_notice", None)
+if notice:
+    st.success(notice)
 
 if manual:
     if st.button("↩️ 清除手動覆蓋 / Clear manual overrides"):
