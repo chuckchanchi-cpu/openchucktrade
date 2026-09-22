@@ -14,3 +14,4 @@ venv/
 
 # Keep xlsx data tracked (no ignore)
 data/now_prices.json
+data/api_key.txt

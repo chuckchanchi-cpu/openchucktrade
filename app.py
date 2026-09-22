@@ -5,14 +5,26 @@ Chuck inputs the latest prices; fring1118/openD can bulk-paste prices too.
 """
 import json
 import os
+import time
 
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 
 import pairs as P
 
 PRICE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "now_prices.json")
 
 st.set_page_config(page_title="OpenChuckTrade Monitor", page_icon="🦞", layout="wide")
+
+# auto-refresh every 15s so openD-pushed quotes show up without manual reload
+st_autorefresh(interval=15000, key="qrefresh")
+
+
+def file_mtime():
+    try:
+        return os.path.getmtime(PRICE_FILE)
+    except Exception:
+        return 0
 
 
 def load_saved_prices():
@@ -33,6 +45,15 @@ pair_list = P.load_pairs()
 stocks = P.unique_stocks(pair_list)
 saved = load_saved_prices()
 
+# auto mode: follow openD-pushed quotes (overrides stale widget state when file changes)
+mtime = file_mtime()
+last_mtime = st.session_state.get("last_mtime", 0)
+auto_mode = st.session_state.get("auto_mode", True)
+if auto_mode and mtime != last_mtime:
+    for k in [k for k in list(st.session_state) if k.startswith("px_")]:
+        del st.session_state[k]
+    st.session_state["last_mtime"] = mtime
+
 # merge: saved price wins, else the sheet's reference price
 prices = {}
 for code, info in stocks.items():
@@ -44,6 +65,15 @@ st.caption("Input latest prices → live pair P/L → profitable pair flags (bot
            "Data source: `data/Record_Sept-22.xlsx` · status `H` (open) pairs only")
 
 # ---------- stock price input ----------
+c_toggle, c_note = st.columns([1, 3])
+with c_toggle:
+    auto_mode = st.toggle("🔄 自動跟 openD 報價", value=auto_mode, key="auto_mode")
+with c_note:
+    if auto_mode:
+        st.caption(f"openD 報價自動更新中（每 15 秒）· 最後更新 "
+                   f"{time.strftime('%H:%M:%S', time.localtime(mtime)) if mtime else '—'}")
+    else:
+        st.caption("已暫停自動同步 — 而家用手動輸入")
 st.subheader("📈 最新價格輸入 / Latest prices")
 cols = st.columns(4)
 new_prices = {}
