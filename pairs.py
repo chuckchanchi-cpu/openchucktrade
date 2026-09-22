@@ -110,24 +110,27 @@ def _extract_pair(block):
             if PRICE_RE.match(prev[0]) and PRICE_RE.match(prev[1]):
                 p["p1"] = _price(prev[0])
                 p["p2"] = _price(prev[1])
-    # earn row: leg values + status (formatted cells may lack "$" in simple version)
+    # earn row: leg values + status (labels optional in simple version — detect via H/TRADE)
+    earn_row = None
     for vals in block:
-        if "Earn" in vals:
-            q = vals[vals.index("Earn") - 1].replace(",", "")
-            if NUM_RE.match(q):
-                p["qty_earn"] = float(q)
-            nums = []
-            for v in (vals[0], vals[1], vals[4], vals[5]):  # legs + formatted legs/pair only (skip qty/status cols)
-                if MONEY_RE.match(v):
-                    nums.append(_money(v))
-                elif PRICE_RE.match(v) and re.search(r"\d", v):
-                    nums.append(_price(v))
-            if len(nums) >= 2:
-                p["buy_leg_stored"], p["pair_pl_stored"] = nums[-2], nums[-1]
-            elif len(nums) == 1:
-                p["buy_leg_stored"] = nums[0]
-            p["status"] = "H" if "H" in vals else ("TRADE" if "TRADE" in vals else "?")
+        if "Earn" in vals or "H" in vals or "TRADE" in vals:
+            earn_row = vals
             break
+    if earn_row is not None:
+        q = earn_row[2].replace(",", "")
+        if NUM_RE.match(q):
+            p["qty_earn"] = float(q)
+        nums = []
+        for v in (earn_row[0], earn_row[1], earn_row[4], earn_row[5]):  # legs + formatted legs/pair only
+            if MONEY_RE.match(v):
+                nums.append(_money(v))
+            elif PRICE_RE.match(v) and re.search(r"\d", v):
+                nums.append(_price(v))
+        if len(nums) >= 2:
+            p["buy_leg_stored"], p["pair_pl_stored"] = nums[-2], nums[-1]
+        elif len(nums) == 1:
+            p["buy_leg_stored"] = nums[0]
+        p["status"] = "H" if "H" in earn_row else ("TRADE" if "TRADE" in earn_row else "?")
     return p
 
 
@@ -187,8 +190,8 @@ def load_pairs(path=None):
             if implied is not None and listed is not None and abs(listed - implied) / implied < 0.05:
                 qs = listed
                 break
-        p["qty_buy"] = qb if qb is not None else (p["qty_stock"] or 0)
-        p["qty_sell"] = qs if qs is not None else (p["qty_earn"] or 0)
+        p["qty_buy"] = qb if qb is not None else (p["qty_stock"] or p["qty_earn"] or 0)
+        p["qty_sell"] = qs if qs is not None else (p["qty_earn"] or p["qty_stock"] or 0)
         p["name1"] = NAME_MAP.get(p["code1"], "")
         p["name2"] = NAME_MAP.get(p["code2"], "")
         pairs.append(p)
