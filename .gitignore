@@ -13,3 +13,4 @@ venv/
 .scratch/
 
 # Keep xlsx data tracked (no ignore)
+data/now_prices.json
