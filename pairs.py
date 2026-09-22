@@ -26,12 +26,18 @@ CODE_RE = re.compile(r"^(\d{3,6})(\.0)?$")
 NAMED_RE = re.compile(r"^(\d{3,6})\s+(BAIDU|Baidu|Bidu)", re.I)
 MONEY_RE = re.compile(r"^-?\$ ?([\d,]+\.?\d*)$")
 NUM_RE = re.compile(r"^-?\d[\d,]*\.?\d*$")
+PRICE_RE = re.compile(r"^-?\$?\s?[\d,]+\.?\d*$")
 
 
 def _money(v):
     neg = v.startswith("-")
     m = re.search(r"[\d,]+\.?\d*", v)
     return -float(m.group(0).replace(",", "")) if neg else float(m.group(0).replace(",", ""))
+
+
+def _price(v):
+    """Parse a price cell that may be plain (29.95) or $-prefixed ($ 64.85)."""
+    return float(v.replace("$", "").replace(",", "").strip())
 
 
 def _parse_blocks(path):
@@ -83,35 +89,43 @@ def _extract_pair(block):
         p["code1"] = "600089"
     if p["code2"] == "60089":
         p["code2"] = "600089"
-    # "$ price" row: two money values + qty + "Stock"
+    # "$ price" row: two money values in the PRICE columns (0,1) + qty (label "Stock" optional)
     dollar_rows = []
     for vals in block:
-        ms = [_money(v) for v in vals if MONEY_RE.match(v)]
-        if len(ms) == 2 and "Stock" in vals:
+        if "Earn" in vals:  # earn rows carry $ legs in cols 0-1 — not a price row
+            continue
+        ms = [_money(v) for v in (vals[0], vals[1]) if MONEY_RE.match(v)]
+        qty_ok = len(vals) > 2 and vals[2] and PRICE_RE.match(vals[2].replace(",", ""))
+        if len(ms) == 2 and (("Stock" in vals) or qty_ok):
             dollar_rows.append((vals, ms))
     if dollar_rows:
         vals, ms = dollar_rows[-1]
         p["now1"], p["now2"] = ms
-        q = vals[vals.index("Stock") - 1].replace(",", "")
+        q = vals[vals.index("Stock") - 1].replace(",", "") if "Stock" in vals else vals[2].replace(",", "")
         if NUM_RE.match(q):
             p["qty_stock"] = float(q)
         idx = block.index(vals)
         if idx > 0:
             prev = block[idx - 1]
-            if NUM_RE.match(prev[0]) and NUM_RE.match(prev[1]):
-                p["p1"] = float(prev[0].replace(",", ""))
-                p["p2"] = float(prev[1].replace(",", ""))
-    # earn row: leg values + status
+            if PRICE_RE.match(prev[0]) and PRICE_RE.match(prev[1]):
+                p["p1"] = _price(prev[0])
+                p["p2"] = _price(prev[1])
+    # earn row: leg values + status (formatted cells may lack "$" in simple version)
     for vals in block:
         if "Earn" in vals:
             q = vals[vals.index("Earn") - 1].replace(",", "")
             if NUM_RE.match(q):
                 p["qty_earn"] = float(q)
-            fmts = [_money(v) for v in vals if MONEY_RE.match(v)]
-            if len(fmts) >= 2:
-                p["buy_leg_stored"], p["pair_pl_stored"] = fmts[-2], fmts[-1]
-            elif len(fmts) == 1:
-                p["buy_leg_stored"] = fmts[0]
+            nums = []
+            for v in (vals[0], vals[1], vals[4], vals[5]):  # legs + formatted legs/pair only (skip qty/status cols)
+                if MONEY_RE.match(v):
+                    nums.append(_money(v))
+                elif PRICE_RE.match(v) and re.search(r"\d", v):
+                    nums.append(_price(v))
+            if len(nums) >= 2:
+                p["buy_leg_stored"], p["pair_pl_stored"] = nums[-2], nums[-1]
+            elif len(nums) == 1:
+                p["buy_leg_stored"] = nums[0]
             p["status"] = "H" if "H" in vals else ("TRADE" if "TRADE" in vals else "?")
             break
     return p
@@ -134,6 +148,7 @@ def load_pairs(path=None):
     """
     path = path or DATA_FILE
     pairs = []
+    seen = {}
     for block in _parse_blocks(path):
         p = _extract_pair(block)
         if p["status"] != "H":
@@ -142,6 +157,21 @@ def load_pairs(path=None):
             continue
         if p["now1"] is None or p["now2"] is None:
             continue
+        # dedupe exact repeats (same date/codes/prices/qty): keep the one with real P/L
+        key = (p["date"], p["code1"], p["code2"], p["p1"], p["p2"], p["now1"], p["now2"])
+        prev = seen.get(key)
+        if prev is not None:
+            prev_zero = prev["pair_pl_stored"] in (None, 0)
+            cur_zero = p["pair_pl_stored"] in (None, 0)
+            if prev_zero and not cur_zero:
+                seen[key] = p
+            elif prev_zero and cur_zero:
+                pass  # identical zeroed repeats: keep the first
+            else:
+                seen[key] = p  # both real: keep the latest occurrence
+            continue
+        seen[key] = p
+    for p in seen.values():
         d1 = p["now1"] - p["p1"]
         d2 = p["p2"] - p["now2"]
         qb = _implied_qty(p["buy_leg_stored"], d1)
