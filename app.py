@@ -1,26 +1,17 @@
 """OpenChuckTrade Monitor — Streamlit app.
 
 Manual price input -> live pair P/L -> profitable pair flags.
-Chuck inputs the latest prices; fring1118/openD can bulk-paste prices too.
+Chuck types / bulk-pastes the latest prices; NO auto-refresh.
 """
 import json
 import os
-import time
-import urllib.request
 
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
 
 import pairs as P
 
 PRICE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "now_prices.json")
-REMOTE_URL = ("https://raw.githubusercontent.com/chuckchanchi-cpu/"
-              "openchucktrade/main/data/quotes.json")
-
 st.set_page_config(page_title="OpenChuckTrade Monitor", page_icon="🦞", layout="wide")
-
-# auto-refresh every 15s so openD-pushed quotes show up without manual reload
-st_autorefresh(interval=15000, key="qrefresh")
 
 
 def file_mtime():
@@ -34,15 +25,6 @@ def load_saved_prices():
     try:
         with open(PRICE_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    except Exception:
-        return {}
-
-
-def load_remote_prices():
-    """quotes.json in the repo — the channel that reaches Streamlit Cloud."""
-    try:
-        with urllib.request.urlopen(REMOTE_URL, timeout=5) as r:
-            return json.load(r)
     except Exception:
         return {}
 
@@ -66,28 +48,13 @@ def save_prices(prices):
 # ---------- load ----------
 pair_list = P.load_pairs()
 stocks = P.unique_stocks(pair_list)
-auto_mode = st.session_state.get("auto_mode", True)
 saved = load_saved_prices()
-remote = load_remote_prices() if auto_mode else {}
-# manual/bulk-applied prices override remote quotes for this session
 manual = st.session_state.get("manual_prices", {})
 
-# auto mode: follow pushed quotes — clear stale widget state when prices changed
-mtime = file_mtime()
-last_mtime = st.session_state.get("last_mtime", 0)
-remote_sig = json.dumps(remote, sort_keys=True) if remote else ""
-last_remote = st.session_state.get("last_remote", "")
-if auto_mode and (mtime != last_mtime or (remote_sig and remote_sig != last_remote)):
-    for k in [k for k in list(st.session_state) if k.startswith("px_")]:
-        del st.session_state[k]
-    st.session_state["last_mtime"] = mtime
-    st.session_state["last_remote"] = remote_sig
-
-# merge: manual (session) > pushed quotes (repo quotes.json) > local file > sheet reference
-merged = {**saved, **remote, **manual}
-prices = {}
+# merge: manual (session override) > local file > sheet reference
+prices = {**saved, **manual}
 for code, info in stocks.items():
-    prices[code] = merged.get(code, info["ref"])
+    prices.setdefault(code, info["ref"])
 
 # ---------- header ----------
 st.title("🦞 OpenChuckTrade — 對沖監察 / Pair Monitor")
@@ -95,18 +62,10 @@ st.caption("Input latest prices → live pair P/L → profitable pair flags (bot
            "Data source: `data/Record_Sept-22.xlsx` · status `H` (open) pairs only")
 
 # ---------- stock price input ----------
-c_toggle, c_note = st.columns([1, 3])
-with c_toggle:
-    auto_mode = st.toggle("🔄 自動跟 openD 報價", value=auto_mode, key="auto_mode")
-with c_note:
-    if auto_mode:
-        note = (f"openD 報價自動更新中（每 15 秒）· 最後更新 "
-                f"{time.strftime('%H:%M:%S', time.localtime(mtime)) if mtime else '—'}")
-    else:
-        note = "已暫停自動同步 — 而家用手動輸入"
-    if manual:
-        note += f"　⚠️ 手動覆蓋: {', '.join(sorted(manual))}"
-    st.caption(note)
+note = "手動輸入模式 — 打價或批量貼上都得，唔會自動更新"
+if manual:
+    note += f"　⚠️ 手動覆蓋: {', '.join(sorted(manual))}"
+st.caption(note)
 st.subheader("📈 最新價格輸入 / Latest prices")
 cols = st.columns(4)
 new_prices = {}
@@ -210,4 +169,4 @@ for p, buy_leg, sell_leg, total in rows:
             f"**配對 `{tot}`**"
         )
 
-st.caption("💡 提示：價格同步去 `data/quotes.json`（GitHub repo，Streamlit Cloud 版本都讀到）＋本地 `data/now_prices.json`；股票代碼可對應 Yahoo Finance（如 9888.HK、600089.SS）俾 openD 攞價。")
+st.caption("💡 手動輸入最新價格 → 即時睇每對配對嘅買腿/賣腿盈虧；⏎ 或出 box 打代碼點擊 Apply bulk prices 一次過更新。")
