@@ -6,6 +6,7 @@ Chuck inputs the latest prices; fring1118/openD can bulk-paste prices too.
 import json
 import os
 import time
+import urllib.request
 
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
@@ -13,6 +14,8 @@ from streamlit_autorefresh import st_autorefresh
 import pairs as P
 
 PRICE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "now_prices.json")
+REMOTE_URL = ("https://raw.githubusercontent.com/chuckchanchi-cpu/"
+              "openchucktrade/main/data/quotes.json")
 
 st.set_page_config(page_title="OpenChuckTrade Monitor", page_icon="🦞", layout="wide")
 
@@ -35,6 +38,15 @@ def load_saved_prices():
         return {}
 
 
+def load_remote_prices():
+    """quotes.json in the repo — the channel that reaches Streamlit Cloud."""
+    try:
+        with urllib.request.urlopen(REMOTE_URL, timeout=5) as r:
+            return json.load(r)
+    except Exception:
+        return {}
+
+
 def save_prices(prices):
     with open(PRICE_FILE, "w", encoding="utf-8") as f:
         json.dump(prices, f, ensure_ascii=False, indent=2)
@@ -43,21 +55,26 @@ def save_prices(prices):
 # ---------- load ----------
 pair_list = P.load_pairs()
 stocks = P.unique_stocks(pair_list)
+auto_mode = st.session_state.get("auto_mode", True)
 saved = load_saved_prices()
+remote = load_remote_prices() if auto_mode else {}
 
-# auto mode: follow openD-pushed quotes (overrides stale widget state when file changes)
+# auto mode: follow pushed quotes — clear stale widget state when prices changed
 mtime = file_mtime()
 last_mtime = st.session_state.get("last_mtime", 0)
-auto_mode = st.session_state.get("auto_mode", True)
-if auto_mode and mtime != last_mtime:
+remote_sig = json.dumps(remote, sort_keys=True) if remote else ""
+last_remote = st.session_state.get("last_remote", "")
+if auto_mode and (mtime != last_mtime or (remote_sig and remote_sig != last_remote)):
     for k in [k for k in list(st.session_state) if k.startswith("px_")]:
         del st.session_state[k]
     st.session_state["last_mtime"] = mtime
+    st.session_state["last_remote"] = remote_sig
 
-# merge: saved price wins, else the sheet's reference price
+# merge: pushed quotes (local file + repo quotes.json) win, else sheet's reference price
+merged = {**saved, **remote}
 prices = {}
 for code, info in stocks.items():
-    prices[code] = saved.get(code, info["ref"])
+    prices[code] = merged.get(code, info["ref"])
 
 # ---------- header ----------
 st.title("🦞 OpenChuckTrade — 對沖監察 / Pair Monitor")
@@ -156,4 +173,4 @@ for p, buy_leg, sell_leg, total in rows:
             f"**配對 `{tot}`**"
         )
 
-st.caption("💡 提示：價格只存喺本地 `data/now_prices.json`；股票代碼可對應 Yahoo Finance（如 9888.HK、600089.SS）俾 openD 攞價。")
+st.caption("💡 提示：價格同步去 `data/quotes.json`（GitHub repo，Streamlit Cloud 版本都讀到）＋本地 `data/now_prices.json`；股票代碼可對應 Yahoo Finance（如 9888.HK、600089.SS）俾 openD 攞價。")
