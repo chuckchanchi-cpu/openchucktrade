@@ -47,6 +47,17 @@ def load_remote_prices():
         return {}
 
 
+def norm_code(c):
+    """0371→371, 00700→700, 002230→2230, HK.0371/0371.HK/371.HK→371, 600089.SS→600089"""
+    c = c.strip().upper().replace(".HK", "").replace(".SS", "").replace(".SZ", "")
+    for pfx in ("HK.", "SH.", "SZ."):
+        if c.startswith(pfx):
+            c = c[len(pfx):]
+    if c.isdigit() and len(c) >= 4 and c.startswith("0"):
+        c = c.lstrip("0")
+    return c
+
+
 def save_prices(prices):
     with open(PRICE_FILE, "w", encoding="utf-8") as f:
         json.dump(prices, f, ensure_ascii=False, indent=2)
@@ -117,7 +128,7 @@ if st.button("📋 套用批量價格 / Apply bulk prices") and bulk.strip():
         parts = line.replace(":", " ").split()
         if len(parts) >= 2:
             try:
-                code, val = parts[0], float(parts[1])
+                code, val = norm_code(parts[0]), float(parts[1])
             except ValueError:
                 continue
             if code in new_prices:
