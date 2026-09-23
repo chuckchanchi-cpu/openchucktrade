@@ -5,12 +5,15 @@ Chuck types / bulk-pastes the latest prices; NO auto-refresh.
 """
 import json
 import os
+import urllib.request
 
 import streamlit as st
 
 import pairs as P
 
 PRICE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "now_prices.json")
+REMOTE_URL = ("https://raw.githubusercontent.com/chuckchanchi-cpu/"
+              "openchucktrade/main/data/quotes.json")
 st.set_page_config(page_title="OpenChuckTrade Monitor", page_icon="🦞", layout="wide")
 
 
@@ -25,6 +28,15 @@ def load_saved_prices():
     try:
         with open(PRICE_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
+    except Exception:
+        return {}
+
+
+def load_remote_prices():
+    """Repo quotes.json = latest pushed openD quotes; seeds the app on page load."""
+    try:
+        with urllib.request.urlopen(REMOTE_URL, timeout=5) as r:
+            return json.load(r)
     except Exception:
         return {}
 
@@ -49,10 +61,11 @@ def save_prices(prices):
 pair_list = P.load_pairs()
 stocks = P.unique_stocks(pair_list)
 saved = load_saved_prices()
+remote = load_remote_prices()   # repo quotes.json = latest pushed openD quotes (seed on load)
 manual = st.session_state.get("manual_prices", {})
 
-# merge: manual (session override) > local file > sheet reference
-prices = {**saved, **manual}
+# merge: manual (session) > pushed quotes (repo) > local file > sheet reference
+prices = {**saved, **remote, **manual}
 for code, info in stocks.items():
     prices.setdefault(code, info["ref"])
 
@@ -62,7 +75,7 @@ st.caption("Input latest prices → live pair P/L → profitable pair flags (bot
            "Data source: `data/Record_Sept-22.xlsx` · status `H` (open) pairs only")
 
 # ---------- stock price input ----------
-note = "手動輸入模式 — 打價或批量貼上都得，唔會自動更新"
+note = "手動輸入模式 — 打價即時生效；重新載入會讀取 repo 最新 openD 報價"
 if manual:
     note += f"　⚠️ 手動覆蓋: {', '.join(sorted(manual))}"
 st.caption(note)
