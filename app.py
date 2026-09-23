@@ -77,7 +77,7 @@ prices = {**seed, **saved, **manual}
 # ---------- header ----------
 st.title("🦞 OpenChuckTrade — 對沖監察 / Pair Monitor")
 st.caption("Input latest prices → live pair P/L → profitable pair flags (both legs green). "
-           "Data source: `data/Record_Sept-22.xlsx` · status `H` (open) pairs only")
+           "Data source: `data/Record_Sept-24.xlsx` · status `H` (open) pairs only")
 
 # ---------- stock price input ----------
 override_codes = sorted(set(manual) | set(saved))

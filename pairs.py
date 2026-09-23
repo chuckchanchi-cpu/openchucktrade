@@ -1,6 +1,6 @@
 """OpenChuckTrade — pair data loader.
 
-Parses Record_Sept-22.xlsx trade blocks into open pairs for the monitor app.
+Parses Record_Sept-24.xlsx trade blocks into open pairs for the monitor app.
 
 Pair concept (per Chuck):
 - Stock 1 (buy leg, kept in wallet): bought at P1, now at N1 -> leg = (N1 - P1) * qty_buy
@@ -12,7 +12,7 @@ import re
 
 import openpyxl
 
-DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "Record_Sept-23.xlsx")
+DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "Record_Sept-24.xlsx")
 
 NAME_MAP = {
     "371": "北控水務", "855": "中國水務", "968": "信義光能", "3800": "協鑫科技",
@@ -154,6 +154,15 @@ def load_pairs(path=None):
     seen = {}
     for block in _parse_blocks(path):
         p = _extract_pair(block)
+        # --- Manual correction (Chuck-confirmed 2026-09-23) ---
+        # The 09-23 9888/9880 block has stored legs 0/0 (entered at market), so the
+        # sheet formulas are direction-agnostic. Real trade = BUY 9880 @ 78.85 /
+        # SELL 9888 @ 88.70 (file lists 9888 first). Swap to show the true direction.
+        if (p["date"] == "2026-09-23" and p["code1"] == "9888" and p["code2"] == "9880"
+                and p["pair_pl_stored"] in (None, 0)):
+            p["code1"], p["code2"] = p["code2"], p["code1"]
+            p["p1"], p["p2"] = p["p2"], p["p1"]
+            p["now1"], p["now2"] = p["now2"], p["now1"]
         if p["status"] != "H":
             continue
         if not (p["code1"] and p["code2"] and p["p1"] is not None and p["p2"] is not None):
