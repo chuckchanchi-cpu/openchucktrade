@@ -52,22 +52,27 @@ def norm_code(c):
     return c
 
 
-def save_prices(prices):
+def save_prices(prices, seed):
+    """Persist ONLY values that differ from the openD seed (true manual overrides)."""
+    overrides = {c: v for c, v in prices.items()
+                 if c in seed and abs(v - seed[c]) > 1e-12}
     with open(PRICE_FILE, "w", encoding="utf-8") as f:
-        json.dump(prices, f, ensure_ascii=False, indent=2)
+        json.dump(overrides, f, ensure_ascii=False, indent=2)
 
 
 # ---------- load ----------
 pair_list = P.load_pairs()
 stocks = P.unique_stocks(pair_list)
-saved = load_saved_prices()
-remote = load_remote_prices()   # repo quotes.json = latest pushed openD quotes (seed on load)
-manual = st.session_state.get("manual_prices", {})
+saved = load_saved_prices()          # persisted manual overrides (user-typed / bulk-applied)
+remote = load_remote_prices()        # repo quotes.json = latest pushed openD quotes (seed)
+manual = st.session_state.get("manual_prices", {})   # session overrides (bulk apply)
 
-# merge: manual (session) > pushed quotes (repo) > local file > sheet reference
-prices = {**saved, **remote, **manual}
-for code, info in stocks.items():
-    prices.setdefault(code, info["ref"])
+# seed = what the app would show with zero user input (openD quotes + sheet refs)
+seed = {code: info["ref"] for code, info in stocks.items()}
+seed.update(remote)
+
+# merge: session manual > saved file > openD seed
+prices = {**seed, **saved, **manual}
 
 # ---------- header ----------
 st.title("🦞 OpenChuckTrade — 對沖監察 / Pair Monitor")
@@ -75,9 +80,10 @@ st.caption("Input latest prices → live pair P/L → profitable pair flags (bot
            "Data source: `data/Record_Sept-22.xlsx` · status `H` (open) pairs only")
 
 # ---------- stock price input ----------
-note = "手動輸入模式 — 打價即時生效；重新載入會讀取 repo 最新 openD 報價"
-if manual:
-    note += f"　⚠️ 手動覆蓋: {', '.join(sorted(manual))}"
+override_codes = sorted(set(manual) | set(saved))
+note = "手動輸入模式 — 打價即時生效、自動記低（重新載入都喺度）；清除後跟 repo openD 報價"
+if override_codes:
+    note += f"　⚠️ 手動覆蓋: {', '.join(override_codes)}"
 st.caption(note)
 st.subheader("📈 最新價格輸入 / Latest prices")
 cols = st.columns(4)
@@ -124,15 +130,17 @@ notice = st.session_state.pop("bulk_notice", None)
 if notice:
     st.success(notice)
 
-if manual:
+if manual or saved:
     if st.button("↩️ 清除手動覆蓋 / Clear manual overrides"):
         st.session_state.pop("manual_prices", None)
         for k in [k for k in list(st.session_state) if k.startswith("px_")]:
             del st.session_state[k]
+        if os.path.exists(PRICE_FILE):
+            os.remove(PRICE_FILE)
         st.rerun()
 
 prices = new_prices
-save_prices(prices)
+save_prices(prices, seed)
 
 # ---------- compute ----------
 rows = []
