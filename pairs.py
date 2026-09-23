@@ -12,7 +12,7 @@ import re
 
 import openpyxl
 
-DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "Record_Sept-22.xlsx")
+DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "Record_Sept-23.xlsx")
 
 NAME_MAP = {
     "371": "北控水務", "855": "中國水務", "968": "信義光能", "3800": "協鑫科技",
