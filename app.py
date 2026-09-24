@@ -55,7 +55,7 @@ def norm_code(c):
 def save_prices(prices, seed):
     """Persist ONLY values that differ from the openD seed (true manual overrides)."""
     overrides = {c: v for c, v in prices.items()
-                 if c in seed and abs(v - seed[c]) > 1e-12}
+                 if c in seed and seed[c] is not None and abs(v - seed[c]) > 1e-12}
     with open(PRICE_FILE, "w", encoding="utf-8") as f:
         json.dump(overrides, f, ensure_ascii=False, indent=2)
 
@@ -68,7 +68,7 @@ remote = load_remote_prices()        # repo quotes.json = latest pushed openD qu
 manual = st.session_state.get("manual_prices", {})   # session overrides (bulk apply)
 
 # seed = what the app would show with zero user input (openD quotes + sheet refs)
-seed = {code: info["ref"] for code, info in stocks.items()}
+seed = {code: info["ref"] for code, info in stocks.items() if info["ref"] is not None}
 seed.update(remote)
 
 # merge: session manual > saved file > openD seed
@@ -92,8 +92,10 @@ for i, (code, info) in enumerate(stocks.items()):
     with cols[i % 4]:
         label = f"{code} {info['name']}".strip()
         val = st.number_input(
-            label, min_value=0.0, value=float(prices[code]), step=0.01,
-            format="%.4f" if float(prices[code]) < 10 else "%.2f",
+            label, min_value=0.0,
+            value=float(prices[code]) if prices.get(code) is not None else 0.0,
+            step=0.01,
+            format="%.4f" if (prices.get(code) or 0) < 10 else "%.2f",
             key=f"px_{code}",
         )
         new_prices[code] = val

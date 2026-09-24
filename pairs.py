@@ -99,6 +99,7 @@ def _extract_pair(block):
         if len(ms) == 2 and (("Stock" in vals) or qty_ok):
             dollar_rows.append((vals, ms))
     if dollar_rows:
+        p["fmt"] = "std"
         vals, ms = dollar_rows[-1]
         p["now1"], p["now2"] = ms
         q = vals[vals.index("Stock") - 1].replace(",", "") if "Stock" in vals else vals[2].replace(",", "")
@@ -110,6 +111,26 @@ def _extract_pair(block):
             if PRICE_RE.match(prev[0]) and PRICE_RE.match(prev[1]):
                 p["p1"] = _price(prev[0])
                 p["p2"] = _price(prev[1])
+    else:
+        p["fmt"] = "simp"  # simplified sheet: plain price row, Stock row = BUY qty, Earn row = SELL qty
+    # fallback: simplified sheet format — plain entry-price row, no "$ price" row
+    if p["p1"] is None or p["p2"] is None:
+        for vals in block[1:]:
+            if any(k in vals for k in ("Earn", "Stock", "H", "TRADE")):
+                continue
+            if CODE_RE.match(vals[0]) or NAMED_RE.match(vals[0]):
+                continue  # codes row
+            if PRICE_RE.match(vals[0]) and PRICE_RE.match(vals[1]):
+                p["p1"], p["p2"] = _price(vals[0]), _price(vals[1])
+                break
+    # qty from the Stock row (simplified format has no "$ price" row to carry it)
+    if p["qty_stock"] is None:
+        for vals in block:
+            if "Stock" in vals:
+                q = vals[vals.index("Stock") - 1].replace(",", "")
+                if NUM_RE.match(q):
+                    p["qty_stock"] = float(q)
+                break
     # earn row: leg values + status (labels optional in simple version — detect via H/TRADE)
     earn_row = None
     for vals in block:
@@ -167,8 +188,8 @@ def load_pairs(path=None):
             continue
         if not (p["code1"] and p["code2"] and p["p1"] is not None and p["p2"] is not None):
             continue
-        if p["now1"] is None or p["now2"] is None:
-            continue
+        # NOTE: pairs may lack the "$ current price" row (now1/now2 = None) —
+        # keep them; the app seeds prices from quotes.json / manual input.
         # dedupe exact repeats (same date/codes/prices/qty): keep the one with real P/L
         key = (p["date"], p["code1"], p["code2"], p["p1"], p["p2"], p["now1"], p["now2"])
         prev = seen.get(key)
@@ -184,8 +205,8 @@ def load_pairs(path=None):
             continue
         seen[key] = p
     for p in seen.values():
-        d1 = p["now1"] - p["p1"]
-        d2 = p["p2"] - p["now2"]
+        d1 = p["now1"] - p["p1"] if p["now1"] is not None else None
+        d2 = p["p2"] - p["now2"] if p["now2"] is not None else None
         qb = _implied_qty(p["buy_leg_stored"], d1)
         qs = _implied_qty(
             p["pair_pl_stored"] - p["buy_leg_stored"] if p["pair_pl_stored"] is not None else None, d2
@@ -199,8 +220,23 @@ def load_pairs(path=None):
             if implied is not None and listed is not None and abs(listed - implied) / implied < 0.05:
                 qs = listed
                 break
-        p["qty_buy"] = qb if qb is not None else (p["qty_stock"] or p["qty_earn"] or 0)
-        p["qty_sell"] = qs if qs is not None else (p["qty_earn"] or p["qty_stock"] or 0)
+        if p["fmt"] == "simp":
+            # Simplified sheet: stored legs are (now=0)-formula artifacts, so the
+            # sheet's own qty = |stored leg| / entry price. Label semantics vary
+            # per block (mostly Stock=buy/Earn=sell, but not always), so derive
+            # from the stored legs first; fall back to Stock/Earn rows.
+            qb = qs = None
+            if p["buy_leg_stored"] is not None and p["p1"]:
+                qb = round(abs(p["buy_leg_stored"]) / p["p1"], 4)
+            if (p["buy_leg_stored"] is not None and p["pair_pl_stored"] is not None
+                    and p["p2"]):
+                qs = round(abs(p["pair_pl_stored"] - p["buy_leg_stored"]) / p["p2"], 4)
+            p["qty_buy"] = qb or (p["qty_stock"] or p["qty_earn"] or 0)
+            p["qty_sell"] = qs or (p["qty_earn"] or p["qty_stock"] or 0)
+        else:
+            # standard sheet: Stock row = sell qty, Earn row = buy qty
+            p["qty_buy"] = qb if qb is not None else (p["qty_earn"] or p["qty_stock"] or 0)
+            p["qty_sell"] = qs if qs is not None else (p["qty_stock"] or p["qty_earn"] or 0)
         p["name1"] = NAME_MAP.get(p["code1"], "")
         p["name2"] = NAME_MAP.get(p["code2"], "")
         pairs.append(p)
