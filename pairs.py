@@ -42,7 +42,7 @@ def _price(v):
 
 def _parse_blocks(path):
     wb = openpyxl.load_workbook(path, data_only=True)
-    ws = wb["Sheet1"]
+    ws = wb[wb.sheetnames[0]]  # accept Sheet1 / 工作表1 (locale-dependent Excel)
     rows = list(ws.iter_rows(values_only=True))
     blocks, cur = [], None
     for r in rows:
